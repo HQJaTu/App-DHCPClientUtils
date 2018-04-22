@@ -6,8 +6,8 @@ use ExtUtils::MakeMaker;
 WriteMakefile(
     NAME             => 'App::DHCPClientUtils',
     AUTHOR           => q{Jari Turkia <jatu@hqcodeshop.fi>},
-    VERSION_FROM     => 'bin/network-interface-info.pl',
-    ABSTRACT_FROM    => 'bin/network-interface-info.pl',
+    VERSION_FROM     => 'lib/App/DHCPClientUtils.pm',
+    ABSTRACT_FROM    => 'lib/App/DHCPClientUtils.pm',
     LICENSE          => 'artistic_2',
     PL_FILES         => {},
     MIN_PERL_VERSION => '5.006',

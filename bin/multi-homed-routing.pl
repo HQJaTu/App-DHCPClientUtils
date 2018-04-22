@@ -610,15 +610,15 @@ sub main()
 }
 
 main();
-
+__END__
 =head1 AUTHOR
 
 Jari Turkia, C<< <jatu at hqcodeshop.fi> >>
 
 =head1 BUGS
 
-Please report any bugs or feature requests to C<bug-net-isc-dhcpclient at rt.cpan.org>, or through
-the web interface at L<http://rt.cpan.org/NoAuth/ReportBug.html?Queue=Net-ISC-DHCPClient>.  I will be notified, and then you'll
+Please report any bugs or feature requests to C<bug-app-dhcpclientutils at rt.cpan.org>, or through
+the web interface at L<http://rt.cpan.org/NoAuth/ReportBug.html?Queue=App-DHCPClientUtils>.  I will be notified, and then you'll
 automatically be notified of progress on your bug as I make changes.
 
 
@@ -628,7 +628,7 @@ automatically be notified of progress on your bug as I make changes.
 
 You can find documentation for this module with the perldoc command.
 
-    perldoc Net::ISC::DHCPClient
+    perldoc App::DHCPClientUtils
 
 
 You can also look for information at:
@@ -637,19 +637,19 @@ You can also look for information at:
 
 =item * RT: CPAN's request tracker (report bugs here)
 
-L<http://rt.cpan.org/NoAuth/Bugs.html?Dist=Net-ISC-DHCPClient>
+L<http://rt.cpan.org/NoAuth/Bugs.html?Dist=App-DHCPClientUtils>
 
 =item * AnnoCPAN: Annotated CPAN documentation
 
-L<http://annocpan.org/dist/Net-ISC-DHCPClient>
+L<http://annocpan.org/dist/App-DHCPClientUtils>
 
 =item * CPAN Ratings
 
-L<http://cpanratings.perl.org/d/Net-ISC-DHCPClient>
+L<http://cpanratings.perl.org/d/App-DHCPClientUtils>
 
 =item * Search CPAN
 
-L<http://search.cpan.org/dist/Net-ISC-DHCPClient/>
+L<http://search.cpan.org/dist/App-DHCPClientUtils/>
 
 =back
 
@@ -659,7 +659,7 @@ L<http://search.cpan.org/dist/Net-ISC-DHCPClient/>
 
 =head1 LICENSE AND COPYRIGHT
 
-Copyright 2017 Jari Turkia.
+Copyright 2018 Jari Turkia.
 
 This program is free software; you can redistribute it and/or modify it
 under the terms of the the Artistic License (2.0). You may obtain a
@@ -700,7 +700,6 @@ EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 =cut
 
-__END__
 =head1 NAME
 
 multi-homed-routing.pl - Using Getopt::Long and Pod::Usage
