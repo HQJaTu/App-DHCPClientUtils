@@ -8,7 +8,7 @@ use Net::ISC::DHCPClient;
 use POSIX qw();
 use Getopt::Long;
 use Pod::Usage;
-use Data::Dumper;
+use App::DHCPClientUtils;
 
 use warnings;
 use strict;

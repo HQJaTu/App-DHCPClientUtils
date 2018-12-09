@@ -10,11 +10,11 @@ App::DHCPClientUtils - Collection of utilities for working with ISC dhclient lea
 
 =head1 VERSION
 
-Version 0.01-1
+Version 0.01-3
 
 =cut
 
-our $VERSION = '0.01-1';
+our $VERSION = '0.01-3';
 
 
 =head1 SYNOPSIS
@@ -129,5 +129,9 @@ EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 =cut
 
+sub new {
+	# There is no code in this library. This file exists only for CPAN to recognize collection of utilities.
+	die "oh no!";
+}
+
 1; # End of App::DHCPClientUtils.
-   # There is no code in this library. This file exists only for CPAN to recognize collection of utilities.

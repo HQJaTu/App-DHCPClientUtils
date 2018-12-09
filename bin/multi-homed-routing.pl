@@ -78,11 +78,11 @@ sub DisplayInterfaceInfo($)
                     leases_path => \@paths_to_attempt,
                     interface   => $if->name
                 );
-        if ($dhclient->is_dhcp()) {
+        if ($dhclient->is_dhcp('inet')) {
             print "is DHCP, ";
 
             my $now = time();
-            my $lease = @{$dhclient->leases()}[0];
+            my $lease = @{$dhclient->leases_af_inet()}[0];
             if ($lease->expire >= $now) {
                 printf("%s lease will expire at: %s\n",
                         $lease->interface,
@@ -121,9 +121,9 @@ sub SuggestSettings($)
                     leases_path => \@paths_to_attempt,
                     interface   => $if->name
                 );
-        if ($dhclient->is_dhcp() && $dhclient->leases()) {
+        if ($dhclient->is_dhcp('inet') && $dhclient->leases_af_inet()) {
             # Nice! The required settings can be detected from most recent lease.
-            my $lease = @{$dhclient->leases()}[0];
+            my $lease = @{$dhclient->leases_af_inet()}[0];
             push(@cmd, '--gateway', "$if=<add it here>") if (!$lease->option()->{routers});
         } else {
             # Add the gateway for a staticly configured interface
@@ -314,7 +314,7 @@ equal)
 
 weighted)
     # Weighted balancing
-    echo "Policy: Equal weight"
+    echo "Policy: Weighted interfaces"
 
     ip route add default table main proto static scope global[% FOREACH if IN interfaces %][% IF if.gateway %] \\
         nexthop via [% if.gateway %] dev [% if.device %] weight [% if.weight %]
@@ -418,7 +418,8 @@ sub main()
                 "weight|w=s@",
                 "gateway=s@",
                 "accept-private-dhcp-addresses!",
-                "add-route=s@"
+                "add-route=s@",
+                "policy|p=s"
     ) or die "Malformed arguments! Stopped.";
 
     pod2usage(-exitval => 0, -verbose => 1) if (defined($opts{help}));
@@ -453,6 +454,8 @@ sub main()
     die "Using this script without two or more network interfaces makes no sense!" if (scalar(@{$opts{interface}}) < 2);
     die "Using this script without two or more routing tables makes no sense! None given." if (!$opts{'routing-table'});
     die "Using this script without two or more routing tables makes no sense!" if (scalar(@{$opts{'routing-table'}}) < 2);
+    my @known_weights = (POLICY_EQUAL, POLICY_WEIGHTED, POLICY_SINGLE);
+    die "Unknown --policy given!" if ($opts{policy} && !grep($opts{policy} eq $_, (POLICY_EQUAL, POLICY_WEIGHTED, POLICY_SINGLE)));
 
     my @ifs_to_use = ();
     my $rt_table = _read_routing_tables();
@@ -534,10 +537,22 @@ sub main()
                                     leases_path => \@paths_to_attempt,
                                     interface   => $if_in
                             );
-            if ($dhclient->is_dhcp() && $dhclient->leases()) {
+            if ($dhclient->is_dhcp('inet') && $dhclient->leases_af_inet()) {
                 # Nice! The required settings can be detected from most recent lease.
-                my $lease = @{$dhclient->leases()}[0];
+                my $lease = @{$dhclient->leases_af_inet()}[0];
                 $gateway = $lease->option()->{routers} if ($lease->option()->{routers});
+            }
+        }
+
+        # Weight given?
+        my $weight = -100;
+        if ($opts{weight} && scalar(@{$opts{weight}})) {
+            for my $weight_in (@{$opts{weight}}) {
+                next if ($weight_in !~ /^\Q$if_in\E=(.+)$/);
+
+                # This is good stuff!
+                $weight = $1;
+                last;
             }
         }
 
@@ -574,7 +589,7 @@ sub main()
             address =>  $ipv4_address,
             network =>  $network,
             gateway =>  $gateway,
-            weight =>   -100,
+            weight =>   $weight,
             crossref => {},
             add_routes => $additional_routes,
             in_main_table => 0,
@@ -602,10 +617,12 @@ sub main()
         $if_info->{in_main_table} = 1 if ($networks{$if_info->{network}} eq $if_info->{device});
     }
 
+    # Policy given?
+
     # Information gathering done!
     # Go figure out the routing
-#   my $policy = POLICY_WEIGHTED;
     my $policy = POLICY_EQUAL;
+    $policy = $opts{policy} if ($opts{policy});
     routing_rules(\@ifs_to_use, $policy);
 }
 
@@ -706,7 +723,7 @@ multi-homed-routing.pl - Using Getopt::Long and Pod::Usage
 
 =head1 SYNOPSIS
 
-network-interface-info.pl [options] [file ...]
+multi-homed-routing.pl [options] [file ...]
  Options:
    -h|--help        brief help message
    -v|--version     show version information
@@ -714,6 +731,11 @@ network-interface-info.pl [options] [file ...]
    -d|--detect      suggest how to run this
    -i|--interface   network interfaces to use
    --gateway        <interface>=<IP-address> network gateway address
+   -p|--policy      routing policy, one of:
+                      equal   : use all gateways equally
+                      weighted: apply given --weight to interface's gateway
+                      single  : using single gateway
+   -w|--weight      <interface>=<weight>
 
 =head1 OPTIONS
 
