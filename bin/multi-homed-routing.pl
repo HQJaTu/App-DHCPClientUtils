@@ -13,11 +13,11 @@ multi-homed-routing.pl - Policy-based IPv4 routing generator
 
 =head1 VERSION
 
-Version 0.01
+Version 0.02
 
 =cut
 
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
 
 use Net::Interface qw(:afs :iffs :iffIN6);
@@ -25,6 +25,7 @@ use Net::IP;
 use Net::ISC::DHCPClient;
 use POSIX qw();
 use Template;
+use Template::Constants qw( :chomp );
 use Getopt::Long;
 use Pod::Usage;
 use Cwd qw ( realpath );
@@ -196,7 +197,7 @@ sub routing_rules($$)
         INTERPOLATE => 1,               # expand "$var" in plain text
         EVAL_PERL   => 1,               # evaluate Perl code blocks
         PRE_CHOMP   => 0,
-        POST_CHOMP  => 1,
+        POST_CHOMP  => 1 # CHOMP_GREEDY,
     };
 
     # create Template object
@@ -234,23 +235,39 @@ ip route flush table [% if.table %]
 [% END %]
 
 # Set up my interfaces
+[% FOREACH if IN interfaces %]
+IF[% if.table %]_DEVICE=[% if.device %]
+
+IF[% if.table %]_IP=[% if.address %]
+
+IF[% if.table %]_NET=[% if.network %]
+
+[% IF if.gateway %]
+IF[% if.table %]_GW=[% if.gateway %]
+
+[% END %]
+[% IF if.weight %]
+IF[% if.table %]_WEIGHT=[% if.weight %]
+
+[% END %]
+[% END %]
 
 # Set up my main routing table
 [% FOREACH if IN interfaces %]
 [% IF if.in_main_table %]
-ip route add [% if.network %] dev [% if.device %] src [% if.address %] table main
+ip route add \\\$IF[% if.table %]_NET dev \\\$IF[% if.table %]_DEVICE src \\\$IF[% if.table %]_IP table main
 [% END %]
 [% END %]
 
 [% FOREACH if IN interfaces %]
-# Table: [% if.table %]
+# Add table [% if.table %] for interface [% if.device %]
 
 [% FOREACH if2 IN interfaces %]
 [% other_device = if2.device %][% IF if.device == if2.device %]
-ip route add [% if2.network %] dev [% if2.device %] src [% if2.address %] table [% if.table %]
+ip route add \\\$IF[% if2.table %]_NET dev \\\$IF[% if2.table %]_DEVICE src \\\$IF[% if2.table %]_IP table [% if.table %]
 
 [% ELSIF if.crossref.\$other_device == 1 %]
-ip route add [% if2.network %] dev [% if2.device %] table [% if.table %]
+ip route add \\\$IF[% if2.table %]_NET dev \\\$IF[% if2.table %]_DEVICE table [% if.table %]
 
 [% ELSE %]
 # Not adding. Shares same network [% if.network %]:
@@ -263,18 +280,17 @@ ip route add [% route %] table [% if.table %]
 
 [% END %]
 ip route add 127.0.0.0/8 dev lo table [% if.table %]
-
 [% IF if.gateway %]
-ip route add default via [% if.gateway %] table [% if.table %]
+
+ip route add default via \\\$IF[% if.table %]_GW table [% if.table %]
 [% END %]
 
 
 [% END %]
-# Set up my routing rules to connect the routing tables into reality
+# Set up my routing rules to connect the above routing tables into reality
 [% FOREACH if IN interfaces %]
-ip rule del from [% if.address %]
-
-ip rule add from [% if.address %] table [% if.table %] prio [% rules_count %][% rules_count = rules_count +1 %]
+ip rule del from \\\$IF[% if.table %]_IP
+ip rule add from \\\$IF[% if.table %]_IP table [% if.table %] prio [% rules_count %][% rules_count = rules_count +1 %]
 
 [% END %]
 
@@ -305,20 +321,18 @@ equal)
     # This will kill SSH and websites whose session depends on IP-address :-(
     echo "Policy: Equal weight"
 
-    ip route add default table main proto static scope global[% FOREACH if IN interfaces -%][% IF if.gateway %] \\
-        nexthop via [% if.gateway %] dev [% if.device %]
-[% END %]
+    ip route add default table main proto static scope global[% FOREACH if IN interfaces %][% IF if.gateway %] \\
+        nexthop via \\\$IF[% if.table %]_GW dev \\\$IF[% if.table %]_DEVICE[% END %]
 [% END %]
 
     ;;
 
 weighted)
     # Weighted balancing
-    echo "Policy: Weighted interfaces"
+    echo "Policy: Weighted interfaces: [% FOREACH if IN interfaces %][% IF if.gateway %]\\\$IF[% if.table %]_DEVICE=\\\$IF[% if.table %]_WEIGHT[% ", " IF !loop.last %][% END %][% END %]"
 
     ip route add default table main proto static scope global[% FOREACH if IN interfaces %][% IF if.gateway %] \\
-        nexthop via [% if.gateway %] dev [% if.device %] weight [% if.weight %]
-[% END %]
+        nexthop via \\\$IF[% if.table %]_GW dev \\\$IF[% if.table %]_DEVICE weight \\\$IF[% if.table %]_WEIGHT[% END %]
 [% END %]
 
     ;;
@@ -332,7 +346,7 @@ single)
 [% IF if.gateway %]
     [% if.device %])
         ip route add default table main proto static scope global \\
-            via [% if.gateway %] dev [% if.device %]
+            via \\\$IF[% if.table %]_GW dev \\\$IF[% if.table %]_DEVICE
 
         ;;
 [% END %]
