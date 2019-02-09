@@ -189,9 +189,9 @@ sub _read_routing_tables()
 #           network =>  Network of the interface in the form, IPv4-address/netmask
 #           gateway =>  IPv4 address of the gateway
 #           weight =>   Weight of the route
-sub routing_rules($$)
+sub routing_rules($$$)
 {
-    my ($interfaces, $default_policy) = @_;
+    my ($interfaces, $default_policy, $single_policy_default_interface) = @_;
 
     my $config = {
         INTERPOLATE => 1,               # expand "$var" in plain text
@@ -210,29 +210,11 @@ sub routing_rules($$)
 # \\\$ [% cmd_line %]
 
 
+
 # Id for this ruleset:
 RULES_ID="[% rules_id %]"
-
-# Save existing, if running the first time:
-if [ ! -e "\\\$RULES_ID.original" ]; then
-    SAVE_FILENAME="\\\$RULES_ID.original"
-    echo "# Rules saved at: \\\$(date +"%F %H:%M:%S")" > "\\\$SAVE_FILENAME"
-    echo "# ip rule list:" >> "\\\$SAVE_FILENAME"
-    ip rule list >> "\\\$SAVE_FILENAME"
-    echo "# ip route show all" >> "\\\$SAVE_FILENAME"
-    ip route show all >> "\\\$SAVE_FILENAME"
-[% FOREACH if IN interfaces %]
-    echo "# ip route show all table [% if.table %]" >> "\\\$SAVE_FILENAME"
-    ip route show all table [% if.table %] >> "\\\$SAVE_FILENAME"
-[% END %]
-fi
-
-# Clear previous routing
-ip route flush all
-[% FOREACH if IN interfaces %]
-ip route flush table [% if.table %]
-
-[% END %]
+RULES_DIR="/var/cache/routing-rules"
+IP_TOOL=/sbin/ip
 
 # Set up my interfaces
 [% FOREACH if IN interfaces %]
@@ -250,47 +232,111 @@ IF[% if.table %]_GW=[% if.gateway %]
 IF[% if.table %]_WEIGHT=[% if.weight %]
 
 [% END %]
+
 [% END %]
 
-# Set up my main routing table
-[% FOREACH if IN interfaces %]
-[% IF if.in_main_table %]
-ip route add \\\$IF[% if.table %]_NET dev \\\$IF[% if.table %]_DEVICE src \\\$IF[% if.table %]_IP table main
-[% END %]
-[% END %]
+# Helper functions
+function verify_ip() {
+    local IP
+    local device=\\\$1
+    local IP_in=\\\$2
+
+    IP=\\\$(\\\$IP_TOOL -4 -o addr show dev \\\$device 2> /dev/null)
+    if [[ \\\$IP =~ inet[[:space:]]+([0-9.]+)/ ]]; then
+        if [ \\\${BASH_REMATCH\[1\]} != \\\$IP_in ]; then
+            echo "IP-address for \\\$device expected to be \\\$IP_in, got \\\${BASH_REMATCH\[1\]}."
+            echo "Re-run multi-homed-routing.pl to update routing setup."
+            return 1
+        fi
+    else
+        echo "Failed to parse IP-address for interface \\\$device."
+        echo "Probably interface is not up. Routing setup called too early?"
+        return 5
+    fi
+
+    return 0
+}
+
+# Keep track of interfaces. We need all of them for this to work properly.
+fail_cnt=0
 
 [% FOREACH if IN interfaces %]
-# Add table [% if.table %] for interface [% if.device %]
+# Check interface [% if.device %]
+
+verify_ip \\\$IF[% if.table %]_DEVICE \\\$IF[% if.table %]_IP
+if [ \\\$? -eq 0 ]; then
+    # Add table [% if.table %] for interface [% if.device %]
+ 
+    \\\$IP_TOOL route flush table [% if.table %]
 
 [% FOREACH if2 IN interfaces %]
 [% other_device = if2.device %][% IF if.device == if2.device %]
-ip route add \\\$IF[% if2.table %]_NET dev \\\$IF[% if2.table %]_DEVICE src \\\$IF[% if2.table %]_IP table [% if.table %]
+    \\\$IP_TOOL route add \\\$IF[% if2.table %]_NET dev \\\$IF[% if2.table %]_DEVICE src \\\$IF[% if2.table %]_IP table [% if.table %]
 
 [% ELSIF if.crossref.\$other_device == 1 %]
-ip route add \\\$IF[% if2.table %]_NET dev \\\$IF[% if2.table %]_DEVICE table [% if.table %]
+    \\\$IP_TOOL route add \\\$IF[% if2.table %]_NET dev \\\$IF[% if2.table %]_DEVICE table [% if.table %]
 
 [% ELSE %]
-# Not adding. Shares same network [% if.network %]:
-#ip route add [% if2.network %] dev [% if2.device %] table [% if.table %]
+    # Not adding. Shares same network [% if.network %]:
+    #\\\$IP_TOOL route add [% if2.network %] dev [% if2.device %] table [% if.table %]
 
 [% END %]
 [% END %]
 [% FOREACH route IN if.add_routes %]
-ip route add [% route %] table [% if.table %]
+    \\\$IP_TOOL route add [% route %] table [% if.table %]
 
 [% END %]
-ip route add 127.0.0.0/8 dev lo table [% if.table %]
+    \\\$IP_TOOL route add 169.254.0.0/16 dev \\\$IF[% if.table %]_DEVICE scope link metric [% if.apipa_metric %] table [% if.table %]
+
+    \\\$IP_TOOL route add 127.0.0.0/8 dev lo table [% if.table %]
 [% IF if.gateway %]
 
-ip route add default via \\\$IF[% if.table %]_GW table [% if.table %]
+    \\\$IP_TOOL route add default via \\\$IF[% if.table %]_GW table [% if.table %]
+[% END %]
+
+else
+    fail_cnt=\\\$((fail_cnt+1))
+fi
+
+[% END %]
+# Proceed routing setup only if all interfaces are ok.
+if [ \\\$fail_cnt -gt 0 ]; then
+    exit 1
+fi
+
+
+# Save existing, if running the first time:
+if [ -e "\\\${RULES_DIR}" ] && [ ! -e "\\\${RULES_DIR}/\\\${RULES_ID}.original" ]; then
+    SAVE_FILENAME="\\\${RULES_DIR}/\\\$RULES_ID.original"
+    echo "# Rules saved at: \\\$(date +"%F %H:%M:%S")" > "\\\$SAVE_FILENAME"
+    echo "# ip rule list:" >> "\\\$SAVE_FILENAME"
+    echo "\\\$(\\\$IP_TOOL rule list)" >> "\\\$SAVE_FILENAME"
+    echo "# ip route show all (table main)" >> "\\\$SAVE_FILENAME"
+    echo "\\\$(\\\$IP_TOOL route show all)" >> "\\\$SAVE_FILENAME"
+[% FOREACH if IN interfaces %]
+#    echo "# ip route show all table [% if.table %]" >> "\\\$SAVE_FILENAME"
+#    echo "\\\$(\\\$IP_TOOL route show all table [% if.table %])" >> "\\\$SAVE_FILENAME"
+[% END %]
+fi
+
+
+# All good. Set up my main routing table
+\\\$IP_TOOL route flush all table main
+[% FOREACH if IN interfaces %]
+[% IF if.in_main_table %]
+\\\$IP_TOOL route add \\\$IF[% if.table %]_NET dev \\\$IF[% if.table %]_DEVICE src \\\$IF[% if.table %]_IP table main[% END %]
+
+[% END %]
+[% FOREACH if IN interfaces %]
+\\\$IP_TOOL route add 169.254.0.0/16 dev \\\$IF[% if.table %]_DEVICE scope link metric [% if.apipa_metric %]
+
 [% END %]
 
 
-[% END %]
 # Set up my routing rules to connect the above routing tables into reality
 [% FOREACH if IN interfaces %]
-ip rule del from \\\$IF[% if.table %]_IP
-ip rule add from \\\$IF[% if.table %]_IP table [% if.table %] prio [% rules_count %][% rules_count = rules_count +1 %]
+\\\$IP_TOOL rule del from \\\$IF[% if.table %]_IP
+\\\$IP_TOOL rule add from \\\$IF[% if.table %]_IP table [% if.table %] prio [% rules_count %][% rules_count = rules_count +1 %]
 
 [% END %]
 
@@ -303,13 +349,23 @@ case "\\\$POLICY" in
     --policy-equal|--policy-weighted|--policy-single)
         POLICY=\\\${POLICY:9}
         if [ "\\\${POLICY}" == "single" ] && [ -z "\\\${IFACE}" ]; then
-            echo "--policy-single needs interface. Using default policy!"
+[% IF single_policy_default_interface %]
+            echo "--policy-single needs interface. Using interface [% single_policy_default_interface %]"
             POLICY=[% default_policy %]
 
+            IFACE=[% single_policy_default_interface %]
+
+[% ELSE %]
+            echo "--policy-single needs interface. Using --policy-equal instead."
+            POLICY=equal
+[% END %]
         fi
         ;;
     *)
         POLICY=[% default_policy %]
+[% IF default_policy == "single" %]
+
+        IFACE=[% single_policy_default_interface %][% END %]
 
 esac
 
@@ -321,7 +377,7 @@ equal)
     # This will kill SSH and websites whose session depends on IP-address :-(
     echo "Policy: Equal weight"
 
-    ip route add default table main proto static scope global[% FOREACH if IN interfaces %][% IF if.gateway %] \\
+    \\\$IP_TOOL route add default table main proto static scope global[% FOREACH if IN interfaces %][% IF if.gateway %] \\
         nexthop via \\\$IF[% if.table %]_GW dev \\\$IF[% if.table %]_DEVICE[% END %]
 [% END %]
 
@@ -331,7 +387,7 @@ weighted)
     # Weighted balancing
     echo "Policy: Weighted interfaces: [% FOREACH if IN interfaces %][% IF if.gateway %]\\\$IF[% if.table %]_DEVICE=\\\$IF[% if.table %]_WEIGHT[% ", " IF !loop.last %][% END %][% END %]"
 
-    ip route add default table main proto static scope global[% FOREACH if IN interfaces %][% IF if.gateway %] \\
+    \\\$IP_TOOL route add default table main proto static scope global[% FOREACH if IN interfaces %][% IF if.gateway %] \\
         nexthop via \\\$IF[% if.table %]_GW dev \\\$IF[% if.table %]_DEVICE weight \\\$IF[% if.table %]_WEIGHT[% END %]
 [% END %]
 
@@ -345,7 +401,7 @@ single)
 [% FOREACH if IN interfaces %]
 [% IF if.gateway %]
     [% if.device %])
-        ip route add default table main proto static scope global \\
+        \\\$IP_TOOL route add default table main proto static scope global \\
             via \\\$IF[% if.table %]_GW dev \\\$IF[% if.table %]_DEVICE
 
         ;;
@@ -374,6 +430,7 @@ END_OF_FILE
         cmd_line        => $cmd_line,
         interfaces      => $interfaces,
         default_policy  => $default_policy,
+        single_policy_default_interface => $single_policy_default_interface,
         rules_id        => 'rules-' . POSIX::strftime("%FT%H:%M:%S", gmtime()),
         rules_count     => $rt_rule_start_number
     };
@@ -433,7 +490,8 @@ sub main()
                 "gateway=s@",
                 "accept-private-dhcp-addresses!",
                 "add-route=s@",
-                "policy|p=s"
+                "policy|p=s",
+                "policy-single-iface=s"
     ) or die "Malformed arguments! Stopped.";
 
     pod2usage(-exitval => 0, -verbose => 1) if (defined($opts{help}));
@@ -468,8 +526,9 @@ sub main()
     die "Using this script without two or more network interfaces makes no sense!" if (scalar(@{$opts{interface}}) < 2);
     die "Using this script without two or more routing tables makes no sense! None given." if (!$opts{'routing-table'});
     die "Using this script without two or more routing tables makes no sense!" if (scalar(@{$opts{'routing-table'}}) < 2);
-    my @known_weights = (POLICY_EQUAL, POLICY_WEIGHTED, POLICY_SINGLE);
-    die "Unknown --policy given!" if ($opts{policy} && !grep($opts{policy} eq $_, (POLICY_EQUAL, POLICY_WEIGHTED, POLICY_SINGLE)));
+    my @known_policies = (POLICY_EQUAL, POLICY_WEIGHTED, POLICY_SINGLE);
+    die "Unknown --policy given!" if ($opts{policy} && !grep($opts{policy} eq $_, @known_policies));
+    die "--policy single needs --policy-single-iface!" if ($opts{policy} eq POLICY_SINGLE && !$opts{'policy-single-iface'});
 
     my @ifs_to_use = ();
     my $rt_table = _read_routing_tables();
@@ -607,11 +666,13 @@ sub main()
             crossref => {},
             add_routes => $additional_routes,
             in_main_table => 0,
+            apipa_metric => 0,
         };
         push(@ifs_to_use, $if_info);
     }
 
     # Crete table cross-references
+    my $apipa_metric = 1002;
     my %networks = ();
     for my $if_info (@ifs_to_use) {
         # First device to claim a network gets it into the main table.
@@ -628,7 +689,11 @@ sub main()
         }
 
         $if_info->{crossref} = $crossrefs;
-        $if_info->{in_main_table} = 1 if ($networks{$if_info->{network}} eq $if_info->{device});
+        if ($networks{$if_info->{network}} eq $if_info->{device}) {
+            $if_info->{in_main_table} = 1;
+            $if_info->{apipa_metric} = $apipa_metric;
+            ++$apipa_metric;
+        }
     }
 
     # Policy given?
@@ -637,7 +702,8 @@ sub main()
     # Go figure out the routing
     my $policy = POLICY_EQUAL;
     $policy = $opts{policy} if ($opts{policy});
-    routing_rules(\@ifs_to_use, $policy);
+    my $policy_single_interface = $opts{'policy-single-iface'} if ($opts{policy} eq POLICY_SINGLE);
+    routing_rules(\@ifs_to_use, $policy, $policy_single_interface);
 }
 
 main();
