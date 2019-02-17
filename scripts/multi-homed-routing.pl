@@ -2,7 +2,7 @@
 
 # vim: tabstop=4 shiftwidth=4 softtabstop=4 expandtab:
 
-use 5.006;
+use 5.014;
 use strict;
 use warnings;
 
@@ -13,11 +13,110 @@ multi-homed-routing.pl - Policy-based IPv4 routing generator
 
 =head1 VERSION
 
-Version 0.02
+Version 0.05
 
 =cut
 
-our $VERSION = '0.02';
+our $VERSION = '0.05';
+
+=head1 SYNOPSIS
+
+App::DHCPClientUtils - Working with non-static IP-addresses can become tricky.
+This set of tools was written to automate the IP-address handling when it changes.
+Typical way sysadmins approach the dynamic IP-addresses is to manually configure
+everything, and react after it changes.
+That is, if/when they notice the address change occurred.
+
+=head1 UTILITIES
+
+=head1 AUTHOR
+
+Jari Turkia, C<< <jatu at hqcodeshop.fi> >>
+
+=head1 BUGS
+
+Please report any bugs or feature requests to C<bug-app-dhcpclientutils at rt.cpan.org>, or through
+the web interface at L<http://rt.cpan.org/NoAuth/ReportBug.html?Queue=App-DHCPClientUtils>.  I will be notified, and then you'll
+automatically be notified of progress on your bug as I make changes.
+
+
+
+
+=head1 SUPPORT
+
+You can find documentation for this module with the perldoc command.
+
+    perldoc App::DHCPClientUtils
+
+
+You can also look for information at:
+
+=over 4
+
+=item * RT: CPAN's request tracker (report bugs here)
+
+L<http://rt.cpan.org/NoAuth/Bugs.html?Dist=App-DHCPClientUtils>
+
+=item * AnnoCPAN: Annotated CPAN documentation
+
+L<http://annocpan.org/dist/App-DHCPClientUtils>
+
+=item * CPAN Ratings
+
+L<http://cpanratings.perl.org/d/App-DHCPClientUtils>
+
+=item * Search CPAN
+
+L<http://search.cpan.org/dist/App-DHCPClientUtils/>
+
+=back
+
+
+=head1 ACKNOWLEDGEMENTS
+
+
+=head1 LICENSE AND COPYRIGHT
+
+Copyright 2018 Jari Turkia.
+
+This program is free software; you can redistribute it and/or modify it
+under the terms of the the Artistic License (2.0). You may obtain a
+copy of the full license at:
+
+L<http://www.perlfoundation.org/artistic_license_2_0>
+
+Any use, modification, and distribution of the Standard or Modified
+Versions is governed by this Artistic License. By using, modifying or
+distributing the Package, you accept this license. Do not use, modify,
+or distribute the Package, if you do not accept this license.
+
+If your Modified Version has been derived from a Modified Version made
+by someone other than you, you are nevertheless required to ensure that
+your Modified Version complies with the requirements of this license.
+
+This license does not grant you the right to use any trademark, service
+mark, tradename, or logo of the Copyright Holder.
+
+This license includes the non-exclusive, worldwide, free-of-charge
+patent license to make, have made, use, offer to sell, sell, import and
+otherwise transfer the Package with respect to any patent claims
+licensable by the Copyright Holder that are necessarily infringed by the
+Package. If you institute patent litigation (including a cross-claim or
+counterclaim) against any party alleging that the Package constitutes
+direct or contributory patent infringement, then this Artistic License
+to you shall terminate on the date that such litigation is filed.
+
+Disclaimer of Warranty: THE PACKAGE IS PROVIDED BY THE COPYRIGHT HOLDER
+AND CONTRIBUTORS "AS IS' AND WITHOUT ANY EXPRESS OR IMPLIED WARRANTIES.
+THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+PURPOSE, OR NON-INFRINGEMENT ARE DISCLAIMED TO THE EXTENT PERMITTED BY
+YOUR LOCAL LAW. UNLESS REQUIRED BY LAW, NO COPYRIGHT HOLDER OR
+CONTRIBUTOR WILL BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, OR
+CONSEQUENTIAL DAMAGES ARISING IN ANY WAY OUT OF THE USE OF THE PACKAGE,
+EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+=cut
 
 
 use Net::Interface qw(:afs :iffs :iffIN6);
@@ -205,11 +304,42 @@ sub routing_rules($$$)
     my $template = <<END_OF_FILE
 #!/bin/bash
 
+# vim: tabstop=4 shiftwidth=4 softtabstop=4 expandtab:
 
-# This script is output of command:
+
+# This script is auto-generated output of command:
 # \\\$ [% cmd_line %]
 
 
+# This script can be called as part of SysV initscripts.
+# For example, in RedHat Linux, symlink this as file /sbin/ifup-local
+# See Red Hat Enterprise Linux7 Networking Guide for details.
+
+# This script can be called as a NetworkManager dispatcher.
+# Symlink this script in directory /etc/NetworkManager/dispatcher.d/
+
+
+
+# Agument handling:
+IFUP_DEVICE=
+if [ \\\$# -gt 0 ]; then
+    # Check if --argument or inteface name
+    if [[ \\\$1 != --* ]]; then
+        # Assume SysV init or Networkmanager interface name
+        IFUP_DEVICE=\\\$1
+        shift
+
+        # Networkmanager?
+        if [ \\\$# -gt 0 ]; then
+            ACTION=\\\$1
+            shift
+            if [ "\\\$ACTION" != "up" ]; then
+                # Run only on interface-up.
+                exit
+            fi
+        fi
+    fi
+fi
 
 # Id for this ruleset:
 RULES_ID="[% rules_id %]"
@@ -425,7 +555,6 @@ END_OF_FILE
             $cmd_line .= $_;
         }
     }
-    my $rules = "";
     my $values = {
         cmd_line        => $cmd_line,
         interfaces      => $interfaces,
@@ -436,13 +565,11 @@ END_OF_FILE
     };
 
     # Go create a setup-file from the template!
-    $tt->process(\$template, $values, $rules) or
+    my $rules;
+	$tt->process(\$template, $values, \$rules) or
         die sprintf("Template error: %s", $tt->error());
 
-    # To-do: Write the rules to a file.
-    # Print the rules to screen
-    print $rules;
-    return;
+    return $rules;
 }
 
 
@@ -487,11 +614,12 @@ sub main()
                 "interface|i=s@",
                 "routing-table|t=s@",
                 "weight|w=s@",
-                "gateway=s@",
+                "gateway|g=s@",
                 "accept-private-dhcp-addresses!",
-                "add-route=s@",
+                "add-route|r=s@",
                 "policy|p=s",
-                "policy-single-iface=s"
+                "policy-single-iface=s",
+                "output-file|o=s"
     ) or die "Malformed arguments! Stopped.";
 
     pod2usage(-exitval => 0, -verbose => 1) if (defined($opts{help}));
@@ -527,6 +655,7 @@ sub main()
     die "Using this script without two or more routing tables makes no sense! None given." if (!$opts{'routing-table'});
     die "Using this script without two or more routing tables makes no sense!" if (scalar(@{$opts{'routing-table'}}) < 2);
     my @known_policies = (POLICY_EQUAL, POLICY_WEIGHTED, POLICY_SINGLE);
+    $opts{policy} = POLICY_SINGLE if (!$opts{policy} && $opts{'policy-single-iface'});
     die "Unknown --policy given!" if ($opts{policy} && !grep($opts{policy} eq $_, @known_policies));
     die "--policy single needs --policy-single-iface!" if ($opts{policy} eq POLICY_SINGLE && !$opts{'policy-single-iface'});
 
@@ -670,10 +799,18 @@ sub main()
         };
         push(@ifs_to_use, $if_info);
     }
+    
+    # Policy given?
+    my $policy = POLICY_EQUAL;
+    $policy = $opts{policy} if ($opts{policy});
+    my $policy_single_interface = $opts{'policy-single-iface'} if ($opts{policy} eq POLICY_SINGLE);
+    my $policy_single_interface_found = 0;
 
     # Crete table cross-references
+    # Confirm, there is a gateway somewhere.
     my $apipa_metric = 1002;
     my %networks = ();
+    my $gateway_count = 0;
     for my $if_info (@ifs_to_use) {
         # First device to claim a network gets it into the main table.
         $networks{$if_info->{network}} = $if_info->{device} if (!defined($networks{$if_info->{network}}));
@@ -694,16 +831,32 @@ sub main()
             $if_info->{apipa_metric} = $apipa_metric;
             ++$apipa_metric;
         }
+        
+        ++$gateway_count if ($if_info->{gateway});
+        $policy_single_interface_found = 1 if ($policy_single_interface && $policy_single_interface eq $if_info->{device});
     }
 
-    # Policy given?
+    # Now that all the facts are there, do some final sanity checks.
+    if (!$gateway_count) {
+        warn "There are no gateways! This routing setup is likely to fail.\n";
+    }
+    if ($policy_single_interface && !$policy_single_interface_found) {
+        die "--policy-single-iface $policy_single_interface is specifying a non-existing interface!";
+    }
 
     # Information gathering done!
     # Go figure out the routing
-    my $policy = POLICY_EQUAL;
-    $policy = $opts{policy} if ($opts{policy});
-    my $policy_single_interface = $opts{'policy-single-iface'} if ($opts{policy} eq POLICY_SINGLE);
-    routing_rules(\@ifs_to_use, $policy, $policy_single_interface);
+    my $rules = routing_rules(\@ifs_to_use, $policy, $policy_single_interface);
+    if ($opts{"output-file"}) {
+        open(RULES, '>', $opts{"output-file"}) or
+            die sprintf("Cannot open file %s for writing! $!", $opts{"output-file"});
+		print RULES $rules;
+		close(RULES);
+		printf("Wrote rules to %s. Done.\n", $opts{"output-file"});
+    } else {
+        # Output rules to STDOUT
+        print $rules;
+    }
 }
 
 main();
@@ -714,9 +867,8 @@ Jari Turkia, C<< <jatu at hqcodeshop.fi> >>
 
 =head1 BUGS
 
-Please report any bugs or feature requests to C<bug-app-dhcpclientutils at rt.cpan.org>, or through
-the web interface at L<http://rt.cpan.org/NoAuth/ReportBug.html?Queue=App-DHCPClientUtils>.  I will be notified, and then you'll
-automatically be notified of progress on your bug as I make changes.
+Please report any bugs or feature requests to GitHub https://github.com/HQJaTu/App-DHCPClientUtils.
+I will be notified, and then you'll automatically be notified of progress on your bug as I make changes.
 
 
 
