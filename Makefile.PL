@@ -24,7 +24,6 @@ WriteMakefile(
         'Template'         => '2.20',
         'Getopt::Long'     => '2.40',
     },
-    LIB              => undef,
     EXE_FILES        => [
         "scripts/network-interface-info.pl",
         "scripts/multi-homed-routing.pl"

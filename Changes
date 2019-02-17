@@ -1,5 +1,12 @@
 Revision history for App-DHCPClientUtils
 
+0.07    Sun 17 Feb 2019 21:47:00 EET
+        Sixth attempt to package scripts to CPAN.
+		Re-introduced lib/ directory. A package won't be indexed without one.
+
+0.06    Sun 17 Feb 2019 21:35:00 EET
+        Fifth attempt to package scripts to CPAN
+
 0.05    Sun 17 Feb 2019 15:26:00 EET
         --policy-single-iface implies --policy single if no policy given.
 		Added --output-file
